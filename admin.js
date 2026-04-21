@@ -686,22 +686,48 @@
     });
   }
 
-  // === SAVE / LOGOUT / EXPORT / IMPORT ===
-  document.addEventListener('click', e => {
+  // === SAVE / LOGOUT / EXPORT / IMPORT / PUBLISH ===
+  function buildSiteJson(ts){
+    return {
+      updatedAt: ts,
+      theme: window.Knizo.loadTheme(),
+      content: { text: draft.text, lists: draft.lists },
+    };
+  }
+  function downloadSiteJson(ts){
+    const blob = new Blob([JSON.stringify(buildSiteJson(ts), null, 2)], { type:'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'site.json';
+    a.click();
+  }
+
+  document.addEventListener('click', async e => {
     if (e.target.closest('#saveAllBtn')){
-      try { window.Knizo.saveContent(draft); window.Knizo.renderAll(); flash('Saved ✓'); }
-      catch (err){ flash('Save failed: ' + err.message, true); }
+      try {
+        const ts = Date.now();
+        window.Knizo.saveContent(draft);
+        window.Knizo.setUpdatedAt(ts);
+        window.Knizo.renderAll();
+        downloadSiteJson(ts);
+        flash('Saved locally + site.json downloaded — commit it to /data/site.json on GitHub to publish');
+      } catch (err){ flash('Save failed: ' + err.message, true); }
+    }
+    if (e.target.closest('#pullBtn')){
+      const updated = await window.Knizo.syncFromRemote();
+      if (updated){
+        draft = window.Knizo.loadContent();
+        if (!Array.isArray(draft.lists.media)) draft.lists.media = [];
+        window.Knizo.renderAll();
+        switchPane('dashboard');
+        flash('Pulled latest from GitHub ✓');
+      } else {
+        flash('Already up to date');
+      }
     }
     if (e.target.closest('#logoutBtn')){ endSession(); showLogin(); }
     if (e.target.closest('#exportBtn')){
-      const blob = new Blob([JSON.stringify({
-        content: window.Knizo.loadContent(),
-        theme: window.Knizo.loadTheme(),
-      }, null, 2)], { type:'application/json' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = 'knizo-site.json';
-      a.click();
+      downloadSiteJson(window.Knizo.getUpdatedAt() || Date.now());
     }
     if (e.target.closest('#importBtn')){
       document.getElementById('importFile').click();
@@ -712,8 +738,14 @@
     const f = e.target.files[0]; if (!f) return;
     try {
       const data = JSON.parse(await f.text());
-      if (data.content) window.Knizo.saveContent(data.content);
+      if (data.content){
+        window.Knizo.saveContent({
+          text: { ...window.Knizo.DEFAULT_CONTENT.text, ...(data.content.text||{}) },
+          lists: { ...window.Knizo.DEFAULT_CONTENT.lists, ...(data.content.lists||{}) },
+        });
+      }
       if (data.theme) window.Knizo.applyTheme(data.theme);
+      if (data.updatedAt) window.Knizo.setUpdatedAt(data.updatedAt);
       window.Knizo.renderAll();
       draft = window.Knizo.loadContent();
       if (!Array.isArray(draft.lists.media)) draft.lists.media = [];

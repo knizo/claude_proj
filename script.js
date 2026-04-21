@@ -1,6 +1,8 @@
 // ===== Knizo public site bootstrap =====
 const STORE_KEY = 'knizo.site.v1';
 const THEME_KEY = 'knizo.theme.v1';
+const TS_KEY    = 'knizo.updatedAt.v1';
+const REMOTE_URL = 'data/site.json';
 
 const DEFAULT_CONTENT = {
   text: {
@@ -91,6 +93,32 @@ function loadContent(){
 }
 function saveContent(c){ localStorage.setItem(STORE_KEY, JSON.stringify(c)); }
 
+function getUpdatedAt(){ return parseInt(localStorage.getItem(TS_KEY) || '0', 10) || 0; }
+function setUpdatedAt(ts){ localStorage.setItem(TS_KEY, String(ts || Date.now())); }
+
+async function fetchRemoteSite(){
+  try {
+    const res = await fetch(REMOTE_URL + '?t=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+async function syncFromRemote(){
+  const remote = await fetchRemoteSite();
+  if (!remote || !remote.content) return false;
+  const remoteTs = remote.updatedAt || 0;
+  if (remoteTs <= getUpdatedAt()) return false;
+  const merged = {
+    text: { ...DEFAULT_CONTENT.text, ...(remote.content.text || {}) },
+    lists: { ...DEFAULT_CONTENT.lists, ...(remote.content.lists || {}) },
+  };
+  saveContent(merged);
+  setUpdatedAt(remoteTs);
+  if (remote.theme) applyTheme(remote.theme);
+  return true;
+}
+
 function loadTheme(){ return localStorage.getItem(THEME_KEY) || 'midnight'; }
 function applyTheme(name){
   document.documentElement.setAttribute('data-theme', name);
@@ -163,6 +191,9 @@ function renderAll(){
 // ===== boot =====
 applyTheme(loadTheme());
 renderAll();
+// Always pull the latest published data from GitHub; if newer than our cached
+// copy, replace it and re-render. localStorage acts as a fast cache + admin draft.
+syncFromRemote().then(updated => { if (updated) renderAll(); });
 
 // nav toggle
 const toggle = document.querySelector('.nav-toggle');
@@ -177,9 +208,11 @@ links?.querySelectorAll('a').forEach(a => {
 
 // expose for admin.js
 window.Knizo = {
-  STORE_KEY, THEME_KEY,
+  STORE_KEY, THEME_KEY, TS_KEY, REMOTE_URL,
   DEFAULT_CONTENT,
   loadContent, saveContent,
   loadTheme, applyTheme,
+  getUpdatedAt, setUpdatedAt,
+  fetchRemoteSite, syncFromRemote,
   renderAll,
 };
